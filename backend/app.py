@@ -1,215 +1,42 @@
+import dash
+from dash import html, dcc
+import dash_bootstrap_components as dbc
+from flask import Flask, redirect
+from flask_login import LoginManager, logout_user
 
-import pandas as pd
-import asyncio
-# pyrefly: ignore [missing-import]
-import joblib
+from auth import User
 
-from datetime import datetime
+server = Flask(__name__)
+server.secret_key = 'super-secret-key-for-secure-dashboard'
 
-from fastapi import FastAPI, WebSocket, Request
-from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.templating import Jinja2Templates
+login_manager = LoginManager()
+login_manager.init_app(server)
+login_manager.login_view = '/login'
 
-# ==========================================
-# FASTAPI
-# ==========================================
+@login_manager.user_loader
+def load_user(username):
+    return User(username)
 
-app = FastAPI()
-
-templates = Jinja2Templates(
-    directory="templates"
+# Initialize Dash
+app = dash.Dash(
+    __name__, 
+    server=server, 
+    use_pages=True, 
+    external_stylesheets=[
+        dbc.themes.CYBORG, 
+        "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
+    ],
+    suppress_callback_exceptions=True
 )
 
-# ==========================================
-# CORS
-# ==========================================
+app.layout = html.Div([
+    dash.page_container
+])
 
-app.add_middleware(
+@server.route('/logout')
+def logout():
+    logout_user()
+    return redirect('/login')
 
-    CORSMiddleware,
-
-    allow_origins=["*"],
-
-    allow_credentials=True,
-
-    allow_methods=["*"],
-
-    allow_headers=["*"],
-)
-
-# ==========================================
-# LOAD MODEL
-# ==========================================
-
-model = joblib.load(
-    "ids_multiclass_pipeline1.pkl"
-)
-
-# ==========================================
-# LOAD ENCODER
-# ==========================================
-
-encoder = joblib.load(
-    "label_encoder1.pkl"
-)
-
-# ==========================================
-# LOAD FEATURES
-# ==========================================
-
-feature_columns = joblib.load(
-    "feature_columns1.pkl"
-)
-
-# ==========================================
-# LOAD LIVE TRAFFIC
-# ==========================================
-
-traffic_data = pd.read_csv(
-    "live_attack.csv"
-)
-
-# ==========================================
-# HOME
-# ==========================================
-
-@app.get(
-    "/",
-    response_class=HTMLResponse
-)
-
-async def dashboard(
-    request: Request
-):
-
-    return templates.TemplateResponse(
-
-        "indexx.html",
-
-        {
-            "request": request
-        }
-    )
-
-# ==========================================
-# WEBSOCKET
-# ==========================================
-
-@app.websocket("/ws")
-
-async def websocket_endpoint(
-    websocket: WebSocket
-):
-
-    await websocket.accept()
-
-    print("WebSocket Connected")
-
-    try:
-
-        while True:
-
-            for _, row in traffic_data.iterrows():
-
-                sample = pd.DataFrame([row])
-
-                # remove target
-                X_sample = sample.drop(
-                    columns=["Attack Type"],
-                    errors="ignore"
-                )
-
-                # clean names
-                X_sample.columns = (
-                    X_sample.columns.str.strip()
-                )
-
-                # align features
-                X_sample = X_sample[
-                    feature_columns
-                ]
-
-                # ==========================
-                # PREDICTION
-                # ==========================
-
-                prediction = model.predict(
-                    X_sample
-                )
-
-                probabilities = (
-                    model.predict_proba(
-                        X_sample
-                    )
-                )
-
-                # decode class
-                predicted_class = (
-                    encoder.inverse_transform(
-                        prediction
-                    )[0]
-                )
-
-                # highest confidence
-                confidence = max(
-                    probabilities[0]
-                )
-
-                # ==========================
-                # SEVERITY
-                # ==========================
-
-                if predicted_class == "BENIGN":
-
-                    severity = "LOW"
-
-                elif confidence >= 0.90:
-
-                    severity = "HIGH"
-
-                elif confidence >= 0.70:
-
-                    severity = "MEDIUM"
-
-                else:
-
-                    severity = "LOW"
-
-                # ==========================
-                # RESPONSE
-                # ==========================
-
-                response = {
-
-                    "timestamp":
-                    str(datetime.now()),
-
-                    "prediction":
-                    predicted_class,
-
-                    "confidence":
-                    round(
-                        confidence * 100,
-                        2
-                    ),
-
-                    "severity":
-                    severity
-
-                }
-
-                print(response)
-
-                await websocket.send_json(
-                    response
-                )
-
-                await asyncio.sleep(1)
-
-    except Exception as e:
-
-        import traceback
-
-        traceback.print_exc()
-
+if __name__ == '__main__':
+    app.run(debug=True, port=8000)

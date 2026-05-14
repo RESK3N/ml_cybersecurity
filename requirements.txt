@@ -8,4 +8,7 @@ fastapi
 uvicorn
 jinja2
 joblib
-
+dash
+dash-bootstrap-components
+flask-login
+ldap3
